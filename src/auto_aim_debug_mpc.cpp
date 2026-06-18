@@ -110,6 +110,8 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     camera.read(img, t);
     auto q = gimbal.q(t);
+    auto gs = gimbal.state();
+    tracker.set_enemy_color(gs.color == 0 ? auto_aim::Color::red : auto_aim::Color::blue);
 
     solver.set_R_gimbal2world(q);
     auto armors = yolo.detect(img);

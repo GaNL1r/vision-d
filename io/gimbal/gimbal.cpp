@@ -281,6 +281,7 @@ void Gimbal::handle_packet(
   state_.pitch = pitch;
   state_.pitch_vel = 0;
   if (has_shoot_data) state_.bullet_speed = shoot_data.bullet_speed;
+  state_.color = gimbal_data.color >= 100 ? 0 : 1;
 
   switch (gimbal_data.mode) {
     case 0:

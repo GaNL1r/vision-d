@@ -98,6 +98,7 @@ int main(int argc, char * argv[])
     camera.read(img, t);
     auto q = gimbal.q(t);
     auto gs = gimbal.state();
+    tracker.set_enemy_color(gs.color == 0 ? auto_aim::Color::red : auto_aim::Color::blue);
     recorder.record(img, q, t);
     solver.set_R_gimbal2world(q);
 
