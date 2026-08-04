@@ -31,7 +31,7 @@ public:
   io::Command decide(const std::vector<DetectionResult> & detection_queue);
 
   Eigen::Vector2d delta_angle(
-    const std::list<auto_aim::Armor> & armors, const std::string & camera);
+    const std::list<auto_aim::Armor> & armors, const std::string & camera) const;
 
   bool armor_filter(std::list<auto_aim::Armor> & armors);
 
@@ -48,15 +48,19 @@ public:
     std::list<auto_aim::Armor> & armors, const std::vector<int8_t> & auto_aim_target);
 
 private:
-  int img_width_;
-  int img_height_;
-  double fov_h_, new_fov_h_;
-  double fov_v_, new_fov_v_;
+  struct CameraView
+  {
+    double yaw_offset_deg;
+    double pitch_offset_deg;
+    double fov_h_deg;
+    double fov_v_deg;
+  };
+
   int mode_;
   int count_;
 
   auto_aim::Color enemy_color_;
-  auto_aim::YOLO detector_;
+  std::unordered_map<std::string, CameraView> camera_views_;
   std::vector<auto_aim::ArmorName> invincible_armor_;  //无敌状态机器人编号,英雄为1，哨兵为6
 
   // 定义ArmorName到ArmorPriority的映射类型

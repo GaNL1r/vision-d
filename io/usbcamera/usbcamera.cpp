@@ -10,7 +10,13 @@ using namespace std::chrono_literals;
 namespace io
 {
 USBCamera::USBCamera(const std::string & open_name, const std::string & config_path)
-: open_name_(open_name), quit_(false), ok_(false), queue_(1), open_count_(0)
+: USBCamera(open_name, config_path, "")
+{
+}
+
+USBCamera::USBCamera(
+  const std::string & open_name, const std::string & config_path, const std::string & role)
+: open_name_(open_name), configured_role_(role), open_count_(0), quit_(false), ok_(false), queue_(1)
 {
   auto yaml = tools::load(config_path);
   image_width_ = tools::read<double>(yaml, "image_width");
@@ -19,6 +25,7 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
   usb_frame_rate_ = tools::read<double>(yaml, "usb_frame_rate");
   usb_gamma_ = tools::read<double>(yaml, "usb_gamma");
   usb_gain_ = tools::read<double>(yaml, "usb_gain");
+  device_name = configured_role_;
   try_open();
 
   // 守护线程
@@ -26,6 +33,7 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
     // tools::logger()->info("daemon thread start");
     while (!quit_) {
       std::this_thread::sleep_for(100ms);
+      if (quit_) break;
 
       if (ok_) continue;
 
@@ -52,6 +60,7 @@ USBCamera::USBCamera(const std::string & open_name, const std::string & config_p
         std::lock_guard<std::mutex> lock(cap_mutex_);
         close();
       }
+      if (quit_) break;
       try_open();
     }
     // tools::logger()->info("daemon thread exit");
@@ -93,32 +102,38 @@ void USBCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point & time
 void USBCamera::open()
 {
   std::lock_guard<std::mutex> lock(cap_mutex_);
-  std::string true_device_name = "/dev/" + open_name_;
+  std::string true_device_name =
+    open_name_.rfind("/dev/", 0) == 0 ? open_name_ : "/dev/" + open_name_;
   cap_.open(true_device_name, cv::CAP_V4L);
   if (!cap_.isOpened()) {
-    tools::logger()->warn("Failed to open USB camera");
+    tools::logger()->warn("Failed to open {} USB camera", true_device_name);
     return;
   }
   sharpness_ = cap_.get(cv::CAP_PROP_SHARPNESS);
+
+  if (!configured_role_.empty()) {
+    device_name = configured_role_;
+  } else if (sharpness_ == 2) {
+    device_name = "left";
+  } else if (sharpness_ == 3) {
+    device_name = "right";
+  } else {
+    device_name = "back";
+    tools::logger()->warn(
+      "{} has no configured role; inferred '{}' from sharpness {}", true_device_name, device_name,
+      sharpness_);
+  }
+
   cap_.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
+  cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
+  cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
   cap_.set(cv::CAP_PROP_FPS, usb_frame_rate_);
   cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);
   cap_.set(cv::CAP_PROP_GAMMA, usb_gamma_);
   cap_.set(cv::CAP_PROP_GAIN, usb_gain_);
+  cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
 
-  if (sharpness_ == 2) {
-    device_name = "left";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
-  } else if (sharpness_ == 3) {
-    device_name = "right";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
-  }
-
-  tools::logger()->info("{} USBCamera opened", device_name);
+  tools::logger()->info("[{}] {} opened", device_name, true_device_name);
   // tools::logger()->info("USBCamera exposure time:{}", cap_.get(cv::CAP_PROP_EXPOSURE));
   tools::logger()->info("USBCamera fps:{}", cap_.get(cv::CAP_PROP_FPS));
   // tools::logger()->info("USBCamera gamma:{}", cap_.get(cv::CAP_PROP_GAMMA));

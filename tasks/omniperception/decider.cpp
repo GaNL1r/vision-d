@@ -2,26 +2,41 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include <filesystem>
+#include <algorithm>
 #include <opencv2/opencv.hpp>
+#include <stdexcept>
 
+#include "io/camera_config.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 
 namespace omniperception
 {
-Decider::Decider(const std::string & config_path) : detector_(config_path), count_(0)
+Decider::Decider(const std::string & config_path) : count_(0)
 {
   auto yaml = YAML::LoadFile(config_path);
-  img_width_ = yaml["image_width"].as<double>();
-  img_height_ = yaml["image_height"].as<double>();
-  fov_h_ = yaml["fov_h"].as<double>();
-  fov_v_ = yaml["fov_v"].as<double>();
-  new_fov_h_ = yaml["new_fov_h"].as<double>();
-  new_fov_v_ = yaml["new_fov_v"].as<double>();
   enemy_color_ =
     (yaml["enemy_color"].as<std::string>() == "red") ? auto_aim::Color::red : auto_aim::Color::blue;
-  mode_ = yaml["mode"].as<double>();
+  mode_ = yaml["mode"].as<int>();
+
+  auto cameras = io::load_camera_configs(config_path);
+  if (cameras.empty()) {
+    auto fov_h = yaml["new_fov_h"].as<double>();
+    auto fov_v = yaml["new_fov_v"].as<double>();
+    camera_views_ = {
+      {"left", {62, 0, fov_h, fov_v}},
+      {"right", {-62, 0, fov_h, fov_v}},
+      {"back", {170, 0, 54.2, 44.5}}};
+    return;
+  }
+
+  for (const auto & camera : cameras) {
+    if (camera.type != "uvc") continue;
+    camera_views_.emplace(
+      camera.role,
+      CameraView{
+        camera.yaw_offset_deg, camera.pitch_offset_deg, camera.fov_h_deg, camera.fov_v_deg});
+  }
 }
 
 io::Command Decider::decide(
@@ -97,7 +112,7 @@ io::Command Decider::decide(const std::vector<DetectionResult> & detection_queue
     return io::Command{false, false, 0, 0};
   }
 
-  DetectionResult dr = detection_queue.front();
+  const auto & dr = detection_queue.front();
   if (dr.armors.empty()) return io::Command{false, false, 0, 0};
   tools::logger()->info(
     "omniperceptron find {},delta yaw is {:.4f}", auto_aim::ARMOR_NAMES[dr.armors.front().name],
@@ -107,26 +122,22 @@ io::Command Decider::decide(const std::vector<DetectionResult> & detection_queue
 };
 
 Eigen::Vector2d Decider::delta_angle(
-  const std::list<auto_aim::Armor> & armors, const std::string & camera)
+  const std::list<auto_aim::Armor> & armors, const std::string & camera) const
 {
-  Eigen::Vector2d delta_angle;
-  if (camera == "left") {
-    delta_angle[0] = 62 + (new_fov_h_ / 2) - armors.front().center_norm.x * new_fov_h_;
-    delta_angle[1] = armors.front().center_norm.y * new_fov_v_ - new_fov_v_ / 2;
-    return delta_angle;
+  if (armors.empty()) {
+    throw std::invalid_argument("Cannot calculate an angle from an empty armor list");
   }
 
-  else if (camera == "right") {
-    delta_angle[0] = -62 + (new_fov_h_ / 2) - armors.front().center_norm.x * new_fov_h_;
-    delta_angle[1] = armors.front().center_norm.y * new_fov_v_ - new_fov_v_ / 2;
-    return delta_angle;
+  auto view = camera_views_.find(camera);
+  if (view == camera_views_.end()) {
+    throw std::invalid_argument("Camera view not configured: " + camera);
   }
 
-  else {
-    delta_angle[0] = 170 + (54.2 / 2) - armors.front().center_norm.x * 54.2;
-    delta_angle[1] = armors.front().center_norm.y * 44.5 - 44.5 / 2;
-    return delta_angle;
-  }
+  const auto & camera_view = view->second;
+  const auto & center = armors.front().center_norm;
+  return {
+    camera_view.yaw_offset_deg + (0.5 - center.x) * camera_view.fov_h_deg,
+    camera_view.pitch_offset_deg + (center.y - 0.5) * camera_view.fov_v_deg};
 }
 
 bool Decider::armor_filter(std::list<auto_aim::Armor> & armors)
@@ -178,6 +189,13 @@ void Decider::sort(std::vector<DetectionResult> & detection_queue)
     dr.armors.sort(
       [](const auto_aim::Armor & a, const auto_aim::Armor & b) { return a.priority < b.priority; });
   }
+
+  detection_queue.erase(
+    std::remove_if(
+      detection_queue.begin(), detection_queue.end(),
+      [](const DetectionResult & result) { return result.armors.empty(); }),
+    detection_queue.end());
+  if (detection_queue.empty()) return;
 
   // 根据优先级对 DetectionResult 进行排序
   std::sort(

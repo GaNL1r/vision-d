@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 
 #include "tasks/auto_aim/yolo.hpp"
@@ -11,24 +12,30 @@
 namespace omniperception
 {
 Perceptron::Perceptron(
-  io::USBCamera * usbcam1, io::USBCamera * usbcam2, io::USBCamera * usbcam3,
-  io::USBCamera * usbcam4, const std::string & config_path)
-: detection_queue_(10), decider_(config_path), stop_flag_(false)
+  const std::vector<io::USBCamera *> & cameras, const std::string & config_path,
+  const std::string & debug_role)
+: detection_queue_(10), decider_(config_path), debug_role_(debug_role), stop_flag_(false)
 {
-  // 初始化 YOLO 模型
-  yolo_parallel1_ = std::make_shared<auto_aim::YOLO>(config_path, false);
-  yolo_parallel2_ = std::make_shared<auto_aim::YOLO>(config_path, false);
-  yolo_parallel3_ = std::make_shared<auto_aim::YOLO>(config_path, false);
-  yolo_parallel4_ = std::make_shared<auto_aim::YOLO>(config_path, false);
+  if (cameras.empty()) {
+    throw std::invalid_argument("Perceptron requires at least one camera");
+  }
 
-  std::this_thread::sleep_for(std::chrono::seconds(2));
-  // 创建四个线程进行并行推理
-  threads_.emplace_back([&] { parallel_infer(usbcam1, yolo_parallel1_); });
-  threads_.emplace_back([&] { parallel_infer(usbcam2, yolo_parallel2_); });
-  threads_.emplace_back([&] { parallel_infer(usbcam3, yolo_parallel3_); });
-  threads_.emplace_back([&] { parallel_infer(usbcam4, yolo_parallel4_); });
+  yolo_detectors_.reserve(cameras.size());
+  threads_.reserve(cameras.size());
+  for (auto * camera : cameras) {
+    if (!camera) {
+      throw std::invalid_argument("Perceptron camera pointer is null");
+    }
+    yolo_detectors_.push_back(std::make_shared<auto_aim::YOLO>(config_path, false));
+  }
 
-  tools::logger()->info("Perceptron initialized.");
+  for (size_t i = 0; i < cameras.size(); ++i) {
+    auto * camera = cameras[i];
+    auto detector = yolo_detectors_[i];
+    threads_.emplace_back([this, camera, detector] { parallel_infer(camera, detector); });
+  }
+
+  tools::logger()->info("Perceptron initialized with {} cameras.", cameras.size());
 }
 
 Perceptron::~Perceptron()
@@ -62,9 +69,27 @@ std::vector<DetectionResult> Perceptron::get_detection_queue()
   return result;
 }
 
+bool Perceptron::raw_target_detected(std::chrono::milliseconds hold_time) const
+{
+  auto last_detection_ns = last_raw_detection_ns_.load(std::memory_order_relaxed);
+  if (last_detection_ns == 0) return false;
+
+  auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now().time_since_epoch())
+                  .count();
+  auto hold_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(hold_time).count();
+  return now_ns - last_detection_ns <= hold_ns;
+}
+
+std::optional<RawDetectionFrame> Perceptron::raw_detection_frame() const
+{
+  std::lock_guard<std::mutex> lock(debug_mutex_);
+  return raw_detection_frame_;
+}
+
 // 将并行推理逻辑移动到类成员函数
 void Perceptron::parallel_infer(
-  io::USBCamera * cam, std::shared_ptr<auto_aim::YOLO> & yolov8_parallel)
+  io::USBCamera * cam, std::shared_ptr<auto_aim::YOLO> yolo_parallel)
 {
   if (!cam) {
     tools::logger()->error("Camera pointer is null!");
@@ -86,7 +111,25 @@ void Perceptron::parallel_infer(
         continue;
       }
 
-      auto armors = yolov8_parallel->detect(usb_img);
+      auto armors = yolo_parallel->detect(usb_img);
+      if (cam->device_name == debug_role_) {
+        RawDetectionFrame frame{usb_img.clone(), armors, ts};
+        std::lock_guard<std::mutex> lock(debug_mutex_);
+        raw_detection_frame_ = std::move(frame);
+      }
+      if (!armors.empty()) {
+        auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+        last_raw_detection_ns_.store(now_ns, std::memory_order_relaxed);
+      }
+      decider_.armor_filter(armors);
+      decider_.set_priority(armors);
+      armors.sort(
+        [](const auto_aim::Armor & a, const auto_aim::Armor & b) {
+          return a.priority < b.priority;
+        });
+
       if (!armors.empty()) {
         auto delta_angle = decider_.delta_angle(armors, cam->device_name);
 
