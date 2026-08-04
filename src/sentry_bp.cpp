@@ -72,11 +72,7 @@ int main(int argc, char * argv[])
 
     auto armors = yolo.detect(img);
 
-    decider.get_invincible_armor(ros2.subscribe_enemy_status());
-
     decider.armor_filter(armors);
-
-    // decider.get_auto_aim_target(armors, ros2.subscribe_autoaim_target());
 
     decider.set_priority(armors);
 

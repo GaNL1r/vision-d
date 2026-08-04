@@ -1,8 +1,11 @@
 #ifndef IO__ROS2_HPP
 #define IO__ROS2_HPP
 
+#include <memory>
+#include <string>
+#include <thread>
+
 #include "publish2nav.hpp"
-#include "subscribe2nav.hpp"
 
 namespace io
 {
@@ -14,10 +17,6 @@ public:
   ~ROS2();
 
   void publish(const Eigen::Vector4d & target_pos);
-
-  std::vector<int8_t> subscribe_enemy_status();
-
-  std::vector<int8_t> subscribe_autoaim_target();
 
   template <typename T>
   std::shared_ptr<rclcpp::Publisher<T>> create_publisher(
@@ -35,10 +34,8 @@ public:
 
 private:
   std::shared_ptr<Publish2Nav> publish2nav_;
-  std::shared_ptr<Subscribe2Nav> subscribe2nav_;
 
   std::unique_ptr<std::thread> publish_spin_thread_;
-  std::unique_ptr<std::thread> subscribe_spin_thread_;
 };
 
 }  // namespace io
