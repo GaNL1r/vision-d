@@ -298,7 +298,8 @@ void Gimbal::handle_packet(
       break;
     default:
       mode_ = GimbalMode::IDLE;
-      tools::logger()->warn("[Gimbal] Invalid mode: {}", gimbal_data.mode);
+      auto invalid_mode = gimbal_data.mode;
+      tools::logger()->warn("[Gimbal] Invalid mode: {}", invalid_mode);
       break;
   }
 }
