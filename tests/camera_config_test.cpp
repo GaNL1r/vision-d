@@ -25,13 +25,12 @@ int main(int argc, char * argv[])
 {
   auto config_path = argc > 1 ? argv[1] : "configs/sentry.yaml";
   auto cameras = io::load_camera_configs(config_path);
-  if (cameras.size() != 4) {
-    throw std::runtime_error("Expected four sentry cameras");
+  if (cameras.size() != 3) {
+    throw std::runtime_error("Expected three sentry cameras");
   }
 
   expect_camera(cameras, "front", "hikrobot");
   expect_camera(cameras, "left", "uvc", "video0");
   expect_camera(cameras, "right", "uvc", "video2");
-  expect_camera(cameras, "back", "uvc", "video4");
   return 0;
 }

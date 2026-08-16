@@ -6,7 +6,7 @@
 
 ## 构建、测试与开发命令
 
-项目主要面向 Ubuntu 22.04，依赖 OpenCV、Eigen、fmt、spdlog、yaml-cpp、OpenVINO、Ceres、相机 SDK 等；完整安装说明见 `readme.md`。
+项目主要面向 Ubuntu 22.04，依赖 OpenCV、Eigen、fmt、spdlog、yaml-cpp、OpenVINO、Ceres 及相机 SDK。配置前确认这些依赖能被 CMake 找到。
 
 ```bash
 cmake -S . -B build
@@ -15,7 +15,7 @@ cmake --build build --target auto_aim_test
 ./build/auto_aim_test
 ```
 
-前两条命令配置并构建全部目标；后两条仅构建并运行默认演示测试。CMake 当前固定查找 `/opt/intel/openvino_2024.6.0`。ROS2 及 `sp_msgs` 可用时才会生成哨兵和 ROS 测试目标。
+前两条命令配置并构建全部目标；后两条仅构建并运行默认演示测试。CMake 当前固定查找 `/opt/intel/openvino_2024.6.0`。`sentry_multithread` 始终生成；无需导航发布时可配置 `-DSRM_VISION_ENABLE_ROS2=OFF`。
 
 ## 编码风格与命名约定
 
@@ -27,4 +27,4 @@ cmake --build build --target auto_aim_test
 
 ## 提交与合并请求
 
-历史仅有少量提交，尚无严格规范。沿用简短、祈使式英文主题，例如 `map control color threshold to target color`；可在必要时使用 `[init]` 一类范围前缀。每个提交聚焦一个逻辑变更。PR 应说明目的、影响模块、构建/测试命令及结果，并关联相关 issue；视觉输出变化附截图或日志，模型与 YAML 变更说明适用机器人及兼容性。不要提交 `build/`、日志、录制视频或设备生成目录。
+历史主题通常简短明确，并可使用 `[feat]`、`[fix]`、`[init]` 等前缀。每个提交聚焦一个逻辑变更。PR 应说明目的、影响模块、构建/测试命令及结果，并关联相关 issue；视觉输出变化附截图或日志，模型与 YAML 变更说明适用机器人及兼容性。不要提交 `build/`、日志、录制视频或设备生成目录。

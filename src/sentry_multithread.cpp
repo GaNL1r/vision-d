@@ -38,7 +38,7 @@ const std::string keys =
   "{help h usage ? |                     | 输出命令行参数说明}"
   "{debug d          | false               | 启用调试可视化}"
   "{detection-view   | false               | 仅显示原始检测状态}"
-  "{view-camera      | front               | 检测画面: front/left/right/back}"
+  "{view-camera      | front               | 检测画面: front/left/right}"
   "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
 
 namespace
@@ -46,8 +46,8 @@ namespace
 std::vector<const io::CameraConfig *> validate_camera_topology(
   const std::vector<io::CameraConfig> & cameras)
 {
-  if (cameras.size() != 4) {
-    throw std::runtime_error("Sentry requires exactly four cameras: front, left, right and back");
+  if (cameras.size() != 3) {
+    throw std::runtime_error("Sentry requires exactly three cameras: front, left and right");
   }
 
   const auto & front = io::camera_config_for_role(cameras, "front");
@@ -56,7 +56,7 @@ std::vector<const io::CameraConfig *> validate_camera_topology(
   }
 
   std::vector<const io::CameraConfig *> uvc_cameras;
-  for (const auto * role : {"left", "right", "back"}) {
+  for (const auto * role : {"left", "right"}) {
     const auto & camera = io::camera_config_for_role(cameras, role);
     if (camera.type != "uvc") {
       throw std::runtime_error("The " + std::string(role) + " camera must be a UVC camera");
