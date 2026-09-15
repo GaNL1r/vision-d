@@ -191,6 +191,15 @@ int main(int argc, char * argv[])
   bool last_front_target_detected = false;
   bool last_omni_target_detected = false;
 
+  // ========== 锁定转向相关变量（switching 与 lost 通用） ==========
+  double locked_target_yaw = 0.0;
+  bool locked_turn = false;
+  double locked_yaw_vel = 0.0;
+  std::chrono::steady_clock::time_point lock_start;  // 进入锁定的时刻（超时计时起点）
+  constexpr auto LOCK_TIMEOUT = 1500ms;  // 转向超时：超过则解锁退出（须 < tracker 的200帧≈3.3s）
+  std::string prev_state = "lost";
+  // ==================================================
+
   while (!exiter.exit()) {
     camera.read(img, timestamp);
     Eigen::Quaterniond q = gimbal.q(timestamp - 1ms);
@@ -238,24 +247,84 @@ int main(int argc, char * argv[])
     }
 
     auto [switch_target, targets] = tracker.track(detection_queue, armors, timestamp);
+    std::string current_state = tracker.state();
+
+    // ========== 锁定转向状态机（switching / lost 通用） ==========
+    // ① 触发锁定：switching 有切换目标，或 lost 时 decide 出 omni 目标
+    if (current_state == "switching" && !locked_turn) {
+      locked_target_yaw = tools::limit_rad(switch_target.delta_yaw + gimbal_pos[0]);
+      locked_turn = true;
+      lock_start = detection_time;
+      tools::logger()->info(
+        "[Switching] 锁定目标方位: {}°", locked_target_yaw * 57.3);
+    }
+    else if (current_state == "lost" && !locked_turn) {
+      io::Command dcmd = decider.decide(detection_queue);
+      if (dcmd.control) {
+        locked_target_yaw = tools::limit_rad(dcmd.yaw + gimbal_pos[0]);
+        locked_turn = true;
+        lock_start = detection_time;
+        tools::logger()->info(
+          "[Lost] 锁定 omni 目标方位: {}°", locked_target_yaw * 57.3);
+      }
+    }
+    // ② 离开 switching/lost（进入 tracking）：清除锁定
+    if (current_state != "switching" && current_state != "lost" && locked_turn) {
+      locked_turn = false;
+      locked_yaw_vel = 0.0;
+      tools::logger()->info("[Lock] 进入 tracking，清除锁定");
+    }
+    // ==================================================
 
     io::Command command{false, false, 0, 0};
 
     /// 全向感知逻辑
-    if (tracker.state() == "switching") {
-      command.control = switch_target.armors.empty() ? false : true;
-      command.shoot = false;
-      command.pitch = tools::limit_rad(switch_target.delta_pitch);
-      command.yaw = tools::limit_rad(switch_target.delta_yaw + gimbal_pos[0]);
+    if (locked_turn) {
+      double yaw_error = locked_target_yaw - gimbal_pos[0];
+      // ========== ① 到位解锁：转到目标位置后才交还控制权 ==========
+      if (std::abs(yaw_error) < 0.03) {  // 约1.7°内认为到位
+        locked_turn = false;
+        locked_yaw_vel = 0.0;
+        tools::logger()->info(
+          "[Lock] 转向到位({:.1f}°)，解锁", yaw_error * 57.3);
+      }
+      // ========== ② 超时退出：目标一直没被前视确认 → 放弃 ==========
+      else if (detection_time - lock_start > LOCK_TIMEOUT) {
+        locked_turn = false;
+        locked_yaw_vel = 0.0;
+        tools::logger()->warn(
+          "[Lock] 超时({}ms)未确认目标，解锁", LOCK_TIMEOUT.count());
+      }
+      // ========== ③ 转向中：只发锁定角，不接收其他指令 ==========
+      else {
+        command.control = true;
+        command.shoot = false;
+        command.pitch = gimbal_pos[1];   // 保持当前俯仰，不参与转向（修正：不用 delta_pitch 增量）
+        const double Kp = 2.0;       // 比例增益，可调整
+        const double max_vel = 2.0;  // 最大角速度 rad/s，可调整
+        locked_yaw_vel = std::clamp(Kp * yaw_error, -max_vel, max_vel);
+        // 死区：误差小于 0.03rad（约1.7°）认为到位
+        if (std::abs(yaw_error) < 0.03) {
+          locked_yaw_vel = 0.0;
+        }
+        command.yaw = locked_target_yaw;  // 用锁定的目标方位，不每帧更新
+      }
     }
-
-    else if (tracker.state() == "lost") {
-      command = decider.decide(detection_queue);
-      command.yaw = tools::limit_rad(command.yaw + gimbal_pos[0]);
-    }
-
-    else {
-      command = aimer.aim(targets, timestamp, gimbal.state().bullet_speed);
+    // 未锁定：按状态正常处理
+    if (!locked_turn) {
+      if (current_state == "switching") {
+        command.control = false;
+        command.shoot = false;
+        command.yaw = gimbal_pos[0];
+        command.pitch = gimbal_pos[1];   // 保持当前俯仰，避免 pitch 归零
+      }
+      else if (current_state == "lost") {
+        command = decider.decide(detection_queue);
+        command.yaw = tools::limit_rad(command.yaw + gimbal_pos[0]);
+      }
+      else {
+        command = aimer.aim(targets, timestamp, gimbal.state().bullet_speed);
+      }
     }
 
     /// 发射逻辑
@@ -263,7 +332,10 @@ int main(int argc, char * argv[])
     // command.shoot = false;
 
     if (gimbal_command_enabled) {
-      gimbal.send(command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0);
+      // ========== 锁定转向期间传计算出的角速度，而非 0 ==========
+      double yaw_vel = locked_turn ? locked_yaw_vel : 0.0;
+      gimbal.send(command.control, command.shoot, command.yaw, yaw_vel, 0, command.pitch, 0, 0);
+      // ==================================================
     }
 
 #ifdef SRM_VISION_WITH_ROS2
@@ -284,7 +356,7 @@ int main(int argc, char * argv[])
                                ? cv::Scalar{0, 255, 0}
                                : cv::Scalar{0, 0, 255};
       tools::draw_text(
-        debug_img, fmt::format("[{}] target: {}", tracker.state(), detection_source), {10, 30},
+        debug_img, fmt::format("[{}] target: {}", current_state, detection_source), {10, 30},
         detection_color);
 
       for (const auto & armor : armors) {
@@ -318,7 +390,7 @@ int main(int argc, char * argv[])
           tools::draw_points(debug_img, image_points, {0, 255, 0});
         }
 
-        if (tracker.state() != "switching") {
+        if (current_state != "switching") {
           auto aim_point = aimer.debug_aim_point;
           auto image_points = solver.reproject_armor(
             aim_point.xyza.head(3), aim_point.xyza[3], target.armor_type, target.name);
@@ -382,6 +454,9 @@ int main(int argc, char * argv[])
       cv::imshow(
         "sentry_detection_view", make_detection_view(selected_image, selected_armors, view_camera));
     }
+
+    // ========== 更新 prev_state（必须在循环末尾） ==========
+    prev_state = current_state;
 
     if ((show_debug_window || show_detection_window) && cv::waitKey(1) == 'q') break;
   }
