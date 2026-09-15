@@ -43,7 +43,7 @@ cameras:
 
   - role: left
     type: uvc
-    device: "video0"
+    device: "video2"
     yaw_offset_deg: 103.9
     pitch_offset_deg: 0
     fov_h_deg: 129.9
@@ -51,7 +51,7 @@ cameras:
 
   - role: right
     type: uvc
-    device: "video2"
+    device: "video0"
     yaw_offset_deg: -103.9
     pitch_offset_deg: 0
     fov_h_deg: 129.9
@@ -70,7 +70,7 @@ max_rectangular_error: 25 # degree
 min_confidence: 0.8
 
 #####-----USB云台通信参数-----#####
-com_port: "/dev/serial/by-id/usb-YueLuEmbedded_Vision_Comm_port_207C37775948-if00"
+com_port: "/dev/serial/by-id/usb-YueLuEmbedded_Vision_Comm_port_206C327D4232-if00"
 gimbal_command_enabled: false # 仅接收下位机状态，不发送云台或发射指令
 
 #####-----tracker参数-----#####
