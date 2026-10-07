@@ -111,8 +111,7 @@ cv::Mat make_detection_view(
 
   if (source.empty()) {
     tools::draw_text(
-      view, fmt::format("WAITING FOR {} FRAME", camera_role), {270, 320}, {180, 180, 180}, 0.8,
-      2);
+      view, fmt::format("WAITING FOR {} FRAME", camera_role), {270, 320}, {180, 180, 180}, 0.8, 2);
     return view;
   }
 
@@ -120,7 +119,8 @@ cv::Mat make_detection_view(
   for (const auto & armor : armors) {
     tools::draw_points(annotated, armor.points, {0, 255, 255});
     auto label = fmt::format("{} {:.2f}", auto_aim::ARMOR_NAMES[armor.name], armor.confidence);
-    auto label_point = cv::Point{static_cast<int>(armor.center.x), static_cast<int>(armor.center.y)};
+    auto label_point =
+      cv::Point{static_cast<int>(armor.center.x), static_cast<int>(armor.center.y)};
     tools::draw_text(annotated, label, label_point, {0, 255, 255}, 0.7, 2);
   }
 
@@ -167,8 +167,8 @@ int main(int argc, char * argv[])
     tools::logger()->warn("[Gimbal] Command output disabled by configuration.");
   }
 
-  auto display_available = std::getenv("DISPLAY") != nullptr ||
-                           std::getenv("WAYLAND_DISPLAY") != nullptr;
+  auto display_available =
+    std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
   auto show_debug_window = debug && display_available;
   auto show_detection_window = (debug || detection_view) && display_available;
   std::unique_ptr<tools::Plotter> plotter;
@@ -194,8 +194,8 @@ int main(int argc, char * argv[])
   std::vector<std::unique_ptr<io::USBCamera>> uvc_cameras;
   std::vector<io::USBCamera *> uvc_camera_ptrs;
   for (const auto * camera_config : uvc_camera_configs) {
-    auto camera = std::make_unique<io::USBCamera>(
-      camera_config->device, config_path, camera_config->role);
+    auto camera =
+      std::make_unique<io::USBCamera>(camera_config->device, config_path, camera_config->role);
     uvc_camera_ptrs.push_back(camera.get());
     uvc_cameras.push_back(std::move(camera));
   }
@@ -290,17 +290,14 @@ int main(int argc, char * argv[])
       locked_target_yaw = tools::limit_rad(switch_target.delta_yaw + gimbal_pos[0]);
       locked_turn = true;
       lock_start = detection_time;
-      tools::logger()->info(
-        "[Switching] 锁定目标方位: {}°", locked_target_yaw * 57.3);
-    }
-    else if (current_state == "lost" && !locked_turn) {
+      tools::logger()->info("[Switching] 锁定目标方位: {}°", locked_target_yaw * 57.3);
+    } else if (current_state == "lost" && !locked_turn) {
       io::Command dcmd = decider.decide(detection_queue);
       if (dcmd.control) {
         locked_target_yaw = tools::limit_rad(dcmd.yaw + gimbal_pos[0]);
         locked_turn = true;
         lock_start = detection_time;
-        tools::logger()->info(
-          "[Lost] 锁定 omni 目标方位: {}°", locked_target_yaw * 57.3);
+        tools::logger()->info("[Lost] 锁定 omni 目标方位: {}°", locked_target_yaw * 57.3);
       }
     }
     // ② 离开 switching/lost（进入 tracking）：清除锁定
@@ -320,21 +317,19 @@ int main(int argc, char * argv[])
       if (std::abs(yaw_error) < 0.03) {  // 约1.7°内认为到位
         locked_turn = false;
         locked_yaw_vel = 0.0;
-        tools::logger()->info(
-          "[Lock] 转向到位({:.1f}°)，解锁", yaw_error * 57.3);
+        tools::logger()->info("[Lock] 转向到位({:.1f}°)，解锁", yaw_error * 57.3);
       }
       // ========== ② 超时退出：目标一直没被前视确认 → 放弃 ==========
       else if (detection_time - lock_start > LOCK_TIMEOUT) {
         locked_turn = false;
         locked_yaw_vel = 0.0;
-        tools::logger()->warn(
-          "[Lock] 超时({}ms)未确认目标，解锁", LOCK_TIMEOUT.count());
+        tools::logger()->warn("[Lock] 超时({}ms)未确认目标，解锁", LOCK_TIMEOUT.count());
       }
       // ========== ③ 转向中：只发锁定角，不接收其他指令 ==========
       else {
         command.control = true;
         command.shoot = false;
-        command.pitch = gimbal_pos[1];   // 保持当前俯仰，不参与转向（修正：不用 delta_pitch 增量）
+        command.pitch = gimbal_pos[1];  // 保持当前俯仰，不参与转向（修正：不用 delta_pitch 增量）
         const double Kp = 2.0;       // 比例增益，可调整
         const double max_vel = 2.0;  // 最大角速度 rad/s，可调整
         locked_yaw_vel = std::clamp(Kp * yaw_error, -max_vel, max_vel);
@@ -351,13 +346,11 @@ int main(int argc, char * argv[])
         command.control = false;
         command.shoot = false;
         command.yaw = gimbal_pos[0];
-        command.pitch = gimbal_pos[1];   // 保持当前俯仰，避免 pitch 归零
-      }
-      else if (current_state == "lost") {
+        command.pitch = gimbal_pos[1];  // 保持当前俯仰，避免 pitch 归零
+      } else if (current_state == "lost") {
         command = decider.decide(detection_queue);
         command.yaw = tools::limit_rad(command.yaw + gimbal_pos[0]);
-      }
-      else {
+      } else {
         command = aimer.aim(targets, timestamp, gimbal.state().bullet_speed);
       }
     }
@@ -393,12 +386,16 @@ int main(int argc, char * argv[])
     if (fire.distance >= 0) fire.detail += fmt::format(" | dist {:.2f}m", fire.distance);
     fire.detail += fire.sent ? " | sent=YES(mode1)" : " | sent=no";
     if (!fire.decision) {
-      if (targets.empty()) fire.detail += " | no target";
-      else if (!command.control) fire.detail += " | not shootable state";
-      else if (!auto_fire) fire.detail += " | auto_fire=false";
+      if (targets.empty())
+        fire.detail += " | no target";
+      else if (!command.control)
+        fire.detail += " | not shootable state";
+      else if (!auto_fire)
+        fire.detail += " | auto_fire=false";
       else if (blocked_by_distance)
         fire.detail += fmt::format(" | {:.2f}m > {:.2f}m", target_distance, max_shoot_distance);
-      else fire.detail += " | tolerance/aim not met";
+      else
+        fire.detail += " | tolerance/aim not met";
     } else if (!fire.sent) {
       fire.detail += " | gimbal cmd disabled";
     }
@@ -420,14 +417,12 @@ int main(int argc, char * argv[])
 
     if (debug) {
       auto debug_img = img.clone();
-      auto detection_source = front_target_detected && omni_target_detected
-                                ? "front+omni"
-                              : front_target_detected ? "front"
-                              : omni_target_detected  ? "omni"
-                                                      : "none";
-      auto detection_color = front_target_detected || omni_target_detected
-                               ? cv::Scalar{0, 255, 0}
-                               : cv::Scalar{0, 0, 255};
+      auto detection_source = front_target_detected && omni_target_detected ? "front+omni"
+                              : front_target_detected                       ? "front"
+                              : omni_target_detected                        ? "omni"
+                                                                            : "none";
+      auto detection_color = front_target_detected || omni_target_detected ? cv::Scalar{0, 255, 0}
+                                                                           : cv::Scalar{0, 0, 255};
       tools::draw_text(
         debug_img, fmt::format("[{}] target: {}", current_state, detection_source), {10, 30},
         detection_color);
@@ -472,8 +467,8 @@ int main(int argc, char * argv[])
           auto image_points = solver.reproject_armor(
             aim_point.xyza.head(3), aim_point.xyza[3], target.armor_type, target.name);
           tools::draw_points(
-            debug_img, image_points, aim_point.valid ? cv::Scalar{0, 0, 255}
-                                                     : cv::Scalar{255, 0, 0});
+            debug_img, image_points,
+            aim_point.valid ? cv::Scalar{0, 0, 255} : cv::Scalar{255, 0, 0});
         }
 
         auto x = target.ekf_x();

@@ -145,8 +145,8 @@ void Gimbal::send(io::VisionToGimbal VisionToGimbal)
   VisionShootCommand shoot_command{VisionToGimbal.mode == 1 ? 1 : 0};
 
   std::vector<uint8_t> packet;
-  int16_t payload_size = sizeof(int16_t) + sizeof(gimbal_command) + sizeof(int16_t) +
-                         sizeof(shoot_command);
+  int16_t payload_size =
+    sizeof(int16_t) + sizeof(gimbal_command) + sizeof(int16_t) + sizeof(shoot_command);
   packet.reserve(sizeof(payload_size) + payload_size);
   append_value(packet, payload_size);
   append_value(packet, GIMBAL_RECV_ID);
@@ -269,10 +269,9 @@ void Gimbal::handle_packet(
   auto yaw = static_cast<float>(gimbal_data.yaw * DEG_TO_RAD);
   auto pitch = static_cast<float>(gimbal_data.pitch * DEG_TO_RAD);
   auto roll = static_cast<float>(gimbal_data.roll * DEG_TO_RAD);
-  Eigen::Quaterniond q =
-    Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-    Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
-    Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+  Eigen::Quaterniond q = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
+                         Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
+                         Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
   queue_.push({q.normalized(), t});
 
   std::lock_guard<std::mutex> lock(mutex_);

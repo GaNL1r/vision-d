@@ -43,11 +43,12 @@ int main(int argc, char * argv[])
   while (!exiter.exit()) {
     auto now = std::chrono::steady_clock::now();
     auto gs = gimbal.state();
-    if(tools::delta_time(now, last_t) > 1.600) {
-        plan.mode = 1;  // 开火
-        tools::logger()->debug("fire!");
-        last_t = now;
-    } else plan.mode = 0;
+    if (tools::delta_time(now, last_t) > 1.600) {
+      plan.mode = 1;  // 开火
+      tools::logger()->debug("fire!");
+      last_t = now;
+    } else
+      plan.mode = 0;
 
     gimbal.send(plan);
 
