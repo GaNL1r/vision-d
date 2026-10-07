@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <list>
 #include <memory>
@@ -66,24 +67,47 @@ std::vector<const io::CameraConfig *> validate_camera_topology(
   return uvc_cameras;
 }
 
+// 开火状态（画面显示用）：区分“自瞄判定要开火”与“实际发到下位机的开火位”
+struct FireIndicator
+{
+  bool display_fire = false;  // 大字显示状态（FIRE 带保持时间，避免单帧闪烁）
+  bool decision = false;      // 当前帧 command.shoot 判定
+  bool sent = false;          // 当前帧实际发出的开火位（gimbal mode==2）
+  double distance = -1.0;     // 目标水平距离(m)，无目标为 -1
+  std::string title;          // 大字文字
+  std::string detail;         // 明细文字（cv::putText 不支持中文，只能英文）
+};
+
+cv::Scalar fire_color(bool fire)
+{
+  return fire ? cv::Scalar{0, 0, 255} : cv::Scalar{150, 150, 150};
+}
+
 cv::Mat make_detection_view(
   const cv::Mat & source, const std::list<auto_aim::Armor> & armors,
-  const std::string & camera_role)
+  const std::string & camera_role, const FireIndicator & fire)
 {
   constexpr int view_width = 960;
   constexpr int view_height = 600;
-  constexpr int header_height = 56;
+  constexpr int header_height = 118;
   cv::Mat view(view_height, view_width, CV_8UC3, cv::Scalar{24, 24, 24});
 
   auto detected = !armors.empty();
   auto status_color = detected ? cv::Scalar{40, 210, 80} : cv::Scalar{40, 40, 220};
-  cv::circle(view, {25, header_height / 2}, 10, status_color, -1);
+  cv::circle(view, {25, 27}, 10, status_color, -1);
   tools::draw_text(
     view,
     fmt::format(
       "{}  {}  raw detections: {}", camera_role, detected ? "DETECTED" : "NO DETECTION",
       armors.size()),
-    {48, 37}, status_color, 0.8, 2);
+    {48, 36}, status_color, 0.8, 2);
+
+  // 开火状态：第一行大字，第二行明细（距离 / 是否真的发出 / 未开火原因）
+  tools::draw_text(view, fire.title, {14, 80}, fire_color(fire.display_fire), 1.2, 3);
+  auto detail = fire.detail;
+  // 左右相机画面来自 perceptron 异步帧，开火状态是主循环最新帧的，标注避免误读
+  if (camera_role != "front") detail += " | async frame";
+  tools::draw_text(view, detail, {14, 108}, {205, 205, 205}, 0.55, 1);
 
   if (source.empty()) {
     tools::draw_text(
@@ -130,6 +154,11 @@ int main(int argc, char * argv[])
   auto yaml = tools::load(config_path);
   auto gimbal_command_enabled =
     yaml["gimbal_command_enabled"] ? yaml["gimbal_command_enabled"].as<bool>() : true;
+  // 目标水平距离超过该值(m)时禁止开火，未配置时默认 5m
+  auto max_shoot_distance =
+    yaml["max_shoot_distance"] ? yaml["max_shoot_distance"].as<double>() : 5.0;
+  // 仅用于画面显示未开火原因（与 shooter 内部读的是同一个键）
+  auto auto_fire = yaml["auto_fire"] ? yaml["auto_fire"].as<bool>() : false;
   auto camera_configs = io::load_camera_configs(config_path);
   auto uvc_camera_configs = validate_camera_topology(camera_configs);
   const auto & view_camera_config = io::camera_config_for_role(camera_configs, view_camera);
@@ -190,6 +219,12 @@ int main(int argc, char * argv[])
   bool detection_log_initialized = false;
   bool last_front_target_detected = false;
   bool last_omni_target_detected = false;
+
+  // ========== 画面开火状态显示：FIRE 保持时间，避免单帧判定看不见 ==========
+  constexpr auto fire_hold_time = 500ms;
+  std::chrono::steady_clock::time_point last_fire_decision;
+  bool fire_decision_seen = false;
+  // ==================================================
 
   // ========== 锁定转向相关变量（switching 与 lost 通用） ==========
   double locked_target_yaw = 0.0;
@@ -331,6 +366,44 @@ int main(int argc, char * argv[])
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
     // command.shoot = false;
 
+    /// 距离限制：目标水平距离超过 max_shoot_distance 时不开火
+    auto target_distance = -1.0;  // 目标水平距离(m)，无目标保持 -1
+    if (!targets.empty()) {
+      auto target_x = targets.front().ekf_x();
+      target_distance = std::sqrt(tools::square(target_x[0]) + tools::square(target_x[2]));
+    }
+    const bool blocked_by_distance = command.shoot && target_distance > max_shoot_distance;
+    if (blocked_by_distance) command.shoot = false;
+
+    // ========== 开火状态（画面显示：判定 vs 实际发出） ==========
+    FireIndicator fire;
+    fire.decision = command.shoot;  // 自瞄判定（已含 5m 闸门）
+    // gimbal.send 里 mode = (control && fire) ? 1 : 0，只有 mode==1 才会下发开火位
+    fire.sent = gimbal_command_enabled && command.control && command.shoot;
+    fire.distance = target_distance;
+    if (command.shoot) {
+      fire_decision_seen = true;
+      last_fire_decision = detection_time;
+    }
+    fire.display_fire = command.shoot || (fire_decision_seen &&
+                                          detection_time - last_fire_decision <= fire_hold_time);
+    fire.title = command.shoot ? "FIRE" : (fire.display_fire ? "FIRE (held)" : "NO FIRE");
+
+    fire.detail = fire.decision ? "dec=1" : "dec=0";
+    if (fire.distance >= 0) fire.detail += fmt::format(" | dist {:.2f}m", fire.distance);
+    fire.detail += fire.sent ? " | sent=YES(mode1)" : " | sent=no";
+    if (!fire.decision) {
+      if (targets.empty()) fire.detail += " | no target";
+      else if (!command.control) fire.detail += " | not shootable state";
+      else if (!auto_fire) fire.detail += " | auto_fire=false";
+      else if (blocked_by_distance)
+        fire.detail += fmt::format(" | {:.2f}m > {:.2f}m", target_distance, max_shoot_distance);
+      else fire.detail += " | tolerance/aim not met";
+    } else if (!fire.sent) {
+      fire.detail += " | gimbal cmd disabled";
+    }
+    // ==================================================
+
     if (gimbal_command_enabled) {
       // ========== 锁定转向期间传计算出的角速度，而非 0 ==========
       double yaw_vel = locked_turn ? locked_yaw_vel : 0.0;
@@ -358,6 +431,10 @@ int main(int argc, char * argv[])
       tools::draw_text(
         debug_img, fmt::format("[{}] target: {}", current_state, detection_source), {10, 30},
         detection_color);
+
+      // 开火状态：第一行大字，第二行明细（距离 / 是否真的发出 / 未开火原因）
+      tools::draw_text(debug_img, fire.title, {10, 85}, fire_color(fire.display_fire), 1.6, 4);
+      tools::draw_text(debug_img, fire.detail, {10, 118}, {205, 205, 205}, 0.7, 2);
 
       for (const auto & armor : armors) {
         tools::draw_points(debug_img, armor.points, {0, 255, 255});
@@ -452,7 +529,8 @@ int main(int argc, char * argv[])
         }
       }
       cv::imshow(
-        "sentry_detection_view", make_detection_view(selected_image, selected_armors, view_camera));
+        "sentry_detection_view",
+        make_detection_view(selected_image, selected_armors, view_camera, fire));
     }
 
     // ========== 更新 prev_state（必须在循环末尾） ==========
