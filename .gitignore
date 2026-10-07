@@ -28,3 +28,4 @@ records_25/
 
 # Sentry 崩溃处理器的运行态文件
 /.sentry-native/
+/assets/uvc_calibration/

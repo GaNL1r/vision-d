@@ -1,0 +1,7 @@
+# 棋盘格内角点数量，不是方格数量；与工业相机标定板配置一致。
+pattern_cols: 11
+pattern_rows: 8
+center_distance_mm: 30
+
+# 最少有效图片数；推荐每台相机采集 20~30 张不同位置、距离、倾角的图片。
+min_views: 12
