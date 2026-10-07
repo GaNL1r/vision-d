@@ -44,11 +44,10 @@ int main(int argc, char * argv[])
     auto now = std::chrono::steady_clock::now();
     auto gs = gimbal.state();
     if(tools::delta_time(now, last_t) > 1.600) {
-        plan.mode = 2;
+        plan.mode = 1;  // 开火
         tools::logger()->debug("fire!");
         last_t = now;
-    } else plan.mode = 1;
-
+    } else plan.mode = 0;
 
     gimbal.send(plan);
 
@@ -56,9 +55,7 @@ int main(int argc, char * argv[])
 
     nlohmann::json data;
 
-    if (plan.mode != 0) {
-      data["shoot"] = plan.mode == 2 ? 1 : 0;
-    }
+    data["shoot"] = plan.mode == 1 ? 1 : 0;
 
     plotter.plot(data);
 

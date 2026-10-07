@@ -36,7 +36,8 @@ static_assert(sizeof(ShootToVision) == 4);
 
 struct __attribute__((packed)) VisionToGimbal
 {
-  uint8_t mode;  // 0: 不控制, 1: 控制云台但不开火，2: 控制云台且开火
+  // 0: 不开火, 1: 开火（仅内部用于生成串口包里的开火位，本身不写入包）
+  uint8_t mode;
   float yaw;
   float yaw_vel;
   float yaw_acc;
