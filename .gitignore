@@ -13,3 +13,18 @@ testvideos/
 watchdog.sh
 records_24/
 records_25/
+
+# 源码根目录误做 in-source cmake/ctest/ament 构建产生的产物（本项目应在 build/ 下构建）
+/CMakeCache.txt
+/CMakeFiles/
+/CTestConfiguration.ini
+/CTestCustom.cmake
+/cmake_install.cmake
+/compile_commands.json
+/Makefile
+/ament_cmake_core/
+/ament_cmake_package_templates/
+/ament_cmake_uninstall_target/
+
+# Sentry 崩溃处理器的运行态文件
+/.sentry-native/
