@@ -142,11 +142,11 @@ void Gimbal::send(io::VisionToGimbal VisionToGimbal)
   VisionGimbalCommand gimbal_command{
     static_cast<float>(VisionToGimbal.yaw * RAD_TO_DEG),
     static_cast<float>(VisionToGimbal.pitch * RAD_TO_DEG)};
-  VisionShootCommand shoot_command{VisionToGimbal.mode == 2 ? 1 : 0};
+  VisionShootCommand shoot_command{VisionToGimbal.mode == 1 ? 1 : 0};
 
   std::vector<uint8_t> packet;
-  int16_t payload_size = sizeof(int16_t) + sizeof(gimbal_command) + sizeof(int16_t) +
-                         sizeof(shoot_command);
+  int16_t payload_size =
+    sizeof(int16_t) + sizeof(gimbal_command) + sizeof(int16_t) + sizeof(shoot_command);
   packet.reserve(sizeof(payload_size) + payload_size);
   append_value(packet, payload_size);
   append_value(packet, GIMBAL_RECV_ID);
@@ -165,7 +165,7 @@ void Gimbal::send(
   bool control, bool fire, float yaw, float yaw_vel, float yaw_acc, float pitch, float pitch_vel,
   float pitch_acc)
 {
-  tx_data_.mode = control ? (fire ? 2 : 1) : 0;
+  tx_data_.mode = (control && fire) ? 1 : 0;
   tx_data_.yaw = yaw;
   tx_data_.yaw_vel = yaw_vel;
   tx_data_.yaw_acc = yaw_acc;
@@ -269,10 +269,9 @@ void Gimbal::handle_packet(
   auto yaw = static_cast<float>(gimbal_data.yaw * DEG_TO_RAD);
   auto pitch = static_cast<float>(gimbal_data.pitch * DEG_TO_RAD);
   auto roll = static_cast<float>(gimbal_data.roll * DEG_TO_RAD);
-  Eigen::Quaterniond q =
-    Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-    Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
-    Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+  Eigen::Quaterniond q = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
+                         Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
+                         Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
   queue_.push({q.normalized(), t});
 
   std::lock_guard<std::mutex> lock(mutex_);

@@ -45,8 +45,16 @@ void load(
 
     // 识别标定板
     std::vector<cv::Point2f> centers_2d;
-    auto success = cv::findCirclesGrid(img, pattern_size, centers_2d, cv::CALIB_CB_SYMMETRIC_GRID);
-
+    auto success = cv::findChessboardCorners(
+      img, cv::Size(11, 8), centers_2d,
+      cv::CALIB_CB_ADAPTIVE_THRESH + cv::CALIB_CB_NORMALIZE_IMAGE);
+    if (success) {
+      cv::Mat gray;
+      cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+      cv::cornerSubPix(
+        gray, centers_2d, cv::Size(11, 11), cv::Size(-1, -1),
+        cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.1));
+    }
     // 显示识别结果
     auto drawing = img.clone();
     cv::drawChessboardCorners(drawing, pattern_size, centers_2d, success);
